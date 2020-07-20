@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 import imutils
 from sklearn.metrics import pairwise
+import yaml
+import keyboard
+import mouse
 
 
 class cvContour:
@@ -16,10 +19,14 @@ class cvContour:
 
 class NumberRecognition:
     def __init__(self, thresh=15):
+        self.parse_settings()
+        return
+
         self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
         # region of interest(roi)
 
         self.accumulate = 0.5
+
         self.thresh = thresh
         self.vid = cv2.VideoCapture(0)
         self.bg = None
@@ -35,15 +42,35 @@ class NumberRecognition:
             contour = self.getContour()
             if contour:
                 thresholded, segmented = contour
-
                 # use the average finger count of the past 5 frames.
+
                 totalcnt += self.count(thresholded, segmented)
                 if cur >= 5:
                     self.cnt = round(totalcnt / cur)
                     cur = 0
                     totalcnt = 0
+            else:
+                self.cnt = 0
+                cur = 0
+                totalcnt = 0
+
             cur += 1
             self.draw()
+
+    def parse_settings(self):
+        settings = None
+        with open("settings.yaml","r") as f:
+            settings = yaml.safe_load(f)
+        print(settings)
+
+    def send_command(self, command):
+        if command=="lmb":
+            mouse.click(button="left")
+        elif command=="rmb":
+            mouse.click(button="right")
+        else:
+            pass
+        return
 
     def getContour(self):
         # basically just a thin wrapper func.
@@ -113,6 +140,7 @@ class NumberRecognition:
 
     def count(self, thresholded, segmented):
         # the algorithm
+        #http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
         # compute complex hull
         chull = cv2.convexHull(segmented)
 
@@ -134,11 +162,13 @@ class NumberRecognition:
         # estimate the palm as a circular region
         radius = int(0.8 * maximum_distance)
         circumference = 2 * np.pi * radius
+
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
         cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
 
         # bitwise and the circle and the full image to get the fingers.
         circular_roi = cv2.bitwise_and(thresholded, thresholded, mask=circular_roi)
+
         cnts, _ = cv2.findContours(
             circular_roi.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
         )
