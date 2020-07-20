@@ -19,8 +19,7 @@ class cvContour:
 
 class NumberRecognition:
     def __init__(self, thresh=15):
-        self.parse_settings()
-        return
+        settings = self.parse_settings()
 
         self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
         # region of interest(roi)
@@ -38,6 +37,8 @@ class NumberRecognition:
         totalcnt = 0
         cur = 0
 
+        prevcnt = -1
+
         while True:
             contour = self.getContour()
             if contour:
@@ -49,6 +50,12 @@ class NumberRecognition:
                     self.cnt = round(totalcnt / cur)
                     cur = 0
                     totalcnt = 0
+
+                if self.cnt!=prevcnt:
+                    if self.cnt!=0 and self.cnt in settings:
+                        self.send_command(settings[self.cnt])
+                    prevcnt = self.cnt
+                   
             else:
                 self.cnt = 0
                 cur = 0
@@ -61,15 +68,16 @@ class NumberRecognition:
         settings = None
         with open("settings.yaml","r") as f:
             settings = yaml.safe_load(f)
-        print(settings)
+        return settings
 
     def send_command(self, command):
         if command=="lmb":
             mouse.click(button="left")
+            print("leftclicked")
         elif command=="rmb":
             mouse.click(button="right")
         else:
-            pass
+            keyboard.press_and_release(command)
         return
 
     def getContour(self):
