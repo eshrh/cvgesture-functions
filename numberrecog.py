@@ -12,14 +12,14 @@ class cvContour:
     def __init__(self, contour):
         self.contour = contour
 
-    def __lt__(self, ocontour):
+    def __lt__(self, ocontour) -> bool:
         # might be other way around?
         return cv2.contourArea(self.contour) < cv2.contourArea(ocontour.contour)
 
 
 class NumberRecognition:
     def __init__(self, thresh=15):
-        settings = self.parse_settings()
+        self.settings = self.parse_settings()
 
         self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
         # region of interest(roi)
@@ -27,126 +27,33 @@ class NumberRecognition:
         self.accumulate = 0.5
 
         self.thresh = thresh
-        self.vid = cv2.VideoCapture(0)
+        self.vid = cv2.VideoCapture(1)
         self.bg = None
         self.cnt = None
 
         # use the first 50 frames to get the running average of the bg.
         self.initweights(50)
-
-        totalcnt = 0
-        cur = 0
-
-        prevcnt = -1
-
-        while True:
-            contour = self.getContour()
-            if contour:
-                thresholded, segmented = contour
-                # use the average finger count of the past 5 frames.
-
-                totalcnt += self.count(thresholded, segmented)
-                if cur >= 5:
-                    self.cnt = round(totalcnt / cur)
-                    cur = 0
-                    totalcnt = 0
-
-                if self.cnt!=prevcnt:
-                    if self.cnt!=0 and self.cnt in settings:
-                        self.send_command(settings[self.cnt])
-                    prevcnt = self.cnt
-                   
-            else:
-                self.cnt = 0
-                cur = 0
-                totalcnt = 0
-
-            cur += 1
-            self.draw()
-
-    def parse_settings(self):
-        settings = None
-        with open("settings.yaml","r") as f:
-            settings = yaml.safe_load(f)
-        return settings
-
-    def send_command(self, command):
-        if command=="lmb":
-            mouse.click(button="left")
-            print("leftclicked")
-        elif command=="rmb":
-            mouse.click(button="right")
-        else:
-            keyboard.press_and_release(command)
-        return
-
-    def getContour(self):
-        # basically just a thin wrapper func.
-        maxcontour = self.contourDetect(self.bwroi())
-        if maxcontour is not -1:
-            return maxcontour
-
-    def bwroi(self):
+    
+    def bwroi(self) -> np.ndarray:
         # crop out the roi from the full frame, blur it to make contouring easier.
         frame = self.getframe()
         cropped = frame[self.top : self.bottom, self.right : self.left]
         return cv2.GaussianBlur(cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY), (7, 7), 0)
-
-    def getframe(self):
-        # general processing
-        _, frame = self.vid.read()
-        if frame is not None:
-            resized = imutils.resize(frame, width=700)
-            frame = cv2.flip(imutils.resize(frame, width=700), 1)
-            self.clone = frame.copy()
-        return frame
-
-    def initweights(self, nframes):
-        # wrapper for accbg
-        for i in range(nframes):
-            self.accbg(self.bwroi())
-
-    def accbg(self, frame):
-        # set the running average of the background
-        if self.bg is None:
-            self.bg = frame.copy().astype("float")
-            return 0
-
-        cv2.accumulateWeighted(frame, self.bg, self.accumulate)
-
-    def contourDetect(self, frame):
+    
+    def contourDetect(self, frame) -> tuple:
         # compute thresholded and contours
         diff = cv2.absdiff(self.bg.astype("uint8"), frame)
         thresholded = cv2.threshold(diff, self.thresh, 255, cv2.THRESH_BINARY)[1]
         contours, hierarchy = cv2.findContours(
             thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
-
         # lots of overhead...
         if contours == []:
             return -1
         # pick the biggest contour
         return (thresholded, max([cvContour(i) for i in contours]).contour)
 
-    def draw(self):
-        cv2.rectangle(
-            self.clone, (self.left, self.top), (self.right, self.bottom), (0, 255, 0), 2
-        )
-        if self.cnt is not None:
-            cv2.putText(
-                self.clone,
-                str(self.cnt),
-                (70, 45),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2,
-            )
-
-        cv2.imshow("opencv", self.clone)
-        cv2.waitKey(1)
-
-    def count(self, thresholded, segmented):
+    def count(self, thresholded, segmented) -> int:
         # the algorithm
         #http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
         # compute complex hull
@@ -187,12 +94,94 @@ class NumberRecognition:
             # it is a finger only if it is outside the palm and not below the palm.
             if ((cY + (cY * 0.25)) > (y + h)) and ((circumference * 0.25) > c.shape[0]):
                 count += 1
-
         return count
 
-    def kill(self):
+    def draw(self) -> None:
+        cv2.rectangle(
+            self.clone, (self.left, self.top), (self.right, self.bottom), (0, 255, 0), 2
+        )
+        if self.cnt is not None:
+            cv2.putText(
+                self.clone,
+                str(self.cnt),
+                (70, 45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+            )
+        cv2.imshow("opencv", self.clone)
+        cv2.waitKey(1)
+
+    def getContour(self) -> tuple:
+        # basically just a thin wrapper func.
+        maxcontour = self.contourDetect(self.bwroi())
+        if maxcontour != -1:
+            return maxcontour
+
+    def getframe(self) -> np.ndarray:
+        # general processing
+        _, frame = self.vid.read()
+        if frame is not None:
+            resized = imutils.resize(frame, width=700)
+            frame = cv2.flip(imutils.resize(frame, width=700), 1)
+            self.clone = frame.copy()
+        return frame
+
+    def initweights(self, nframes) -> None:
+        # wrapper for accbg
+        for _ in range(nframes):
+            frame = self.bwroi()
+            # set the running average of the background
+            if self.bg is None:
+                self.bg = frame.copy().astype("float")
+                continue
+            cv2.accumulateWeighted(frame, self.bg, self.accumulate)
+    
+    def kill(self) -> None:
         self.vid.release()
         cv2.destroyAllWindows()
+    
+    def parse_settings(self) -> dict:
+        settings = None
+        with open("settings.yaml","r") as f:
+            settings = yaml.safe_load(f)
+        return settings
 
+    def run(self) -> None:
+        totalcnt = 0
+        cur = 0
+        prevcnt = -1
+        while True:
+            contour = self.getContour()
+            if contour:
+                thresholded, segmented = contour
+                # use the average finger count of the past 5 frames.
+                totalcnt += self.count(thresholded, segmented)
+                if cur >= 5:
+                    self.cnt = round(totalcnt / cur)
+                    cur = 0
+                    totalcnt = 0
+                if self.cnt != prevcnt:
+                    if self.cnt!=0 and self.cnt in self.settings:
+                        self.send_command(self.settings[self.cnt])
+                    prevcnt = self.cnt
+            else:
+                self.cnt = 0
+                cur = 0
+                totalcnt = 0
+            cur += 1
+            self.draw()
+
+    def send_command(self, command) -> None:
+        if command=="lmb":
+            mouse.click(button="left")
+            print("leftclicked")
+        elif command=="rmb":
+            mouse.click(button="right")
+        else:
+            keyboard.press_and_release(command)
+        return
 
 numrec = NumberRecognition()
+numrec.run()
