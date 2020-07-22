@@ -27,7 +27,7 @@ class NumberRecognition:
         self.accumulate = 0.5
 
         self.thresh = thresh
-        self.vid = cv2.VideoCapture(1)
+        self.vid = cv2.VideoCapture(0)
         self.bg = None
         self.cnt = None
 
