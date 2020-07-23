@@ -91,7 +91,7 @@ class NumberRecognition:
         # pick the biggest contour
         return (thresholded, max([cvContour(i) for i in contours]).contour)
 
-    def countFingers(self, thresholded: np.ndarray, segmented: np.ndarray, palm_to_distance_ratio=0.75) -> int:
+    def countFingers(self, thresholded: np.ndarray, segmented: np.ndarray, palm_to_distance_ratio=0.8) -> int:
         """Counts the fingers held up on a hand."""
         # the algorithm
         # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
@@ -106,8 +106,12 @@ class NumberRecognition:
         extreme_right = tuple(chull[chull[:, :, 0].argmax()][0])
 
         # palm center
-        cX = int((extreme_left[0] + extreme_right[0]) / 2)
-        cY = int((extreme_top[1] + extreme_bottom[1]) / 2)
+        # cX = int((extreme_left[0] + extreme_right[0]) / 2)
+        # cY = int((extreme_top[1] + extreme_bottom[1]) / 2)
+        M = cv2.moments(thresholded)
+        cX = int(M['m10']/M['m00'])
+        cY = int(M['m01']/M['m00'])
+        # print(cX)
         self.cX,self.cY = cX,cY
 
         # Find max distance between the extrema
@@ -145,6 +149,7 @@ class NumberRecognition:
             #     self.finger_rects_and_cnt.append((x, y, w, h, c))
             #     count += 1
             if (circumference * 0.10 > c.shape[0]):
+                # print(c.shape[0])
                 self.finger_rects_and_cnt.append((x, y, w, h, c))
                 count += 1
         return count
@@ -311,7 +316,7 @@ class NumberRecognition:
                 # use the average finger count of the past 5 frames.
                 totalcnt += self.countFingers(
                     self.thresholded.copy(), self.hand_cnt.copy()
-                )
+                    )
                 if cur >= 5:
                     self.cnt = round(totalcnt / cur)
                     cur = 0
@@ -328,6 +333,6 @@ class NumberRecognition:
             self.show()
 
 
-#numrec = NumberRecognition(thresh=45, camera=1)
-numrec = NumberRecognition(thresh=45, camera=0)
+numrec = NumberRecognition(thresh=15, camera=1)
+# numrec = NumberRecognition(thresh=45, camera=0)
 numrec.run()
