@@ -91,12 +91,11 @@ class NumberRecognition:
         # pick the biggest contour
         return (thresholded, max([cvContour(i) for i in contours]).contour)
 
-    def countFingers(self, thresholded: np.ndarray, segmented: np.ndarray) -> int:
+    def countFingers(self, thresholded: np.ndarray, segmented: np.ndarray, palm_to_distance_ratio=0.75) -> int:
         """Counts the fingers held up on a hand."""
         # the algorithm
         # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
         # compute complex hull
-        palm_to_distance_ratio = 0.7
         chull = cv2.convexHull(segmented)
         self.chull = chull
 
@@ -123,7 +122,9 @@ class NumberRecognition:
         circumference = 2 * np.pi * radius
 
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
-        cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
+        #cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
+        cv2.ellipse(circular_roi, (cX,cY), (radius,radius//2), 0, 0, 360, 255, 1)
+
         self.palm_circle = circular_roi
 
         # bitwise and the circle and the full image to get the fingers.
@@ -133,17 +134,17 @@ class NumberRecognition:
         cnts, _ = cv2.findContours(
             circular_roi.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
             )
+
         self.finger_cnts = cnts
         count = 0
         self.finger_rects_and_cnt = []
         for c in cnts:
             (x, y, w, h) = cv2.boundingRect(c)
-
             # it is a finger only if it is outside the palm and not below the palm.
             # if ((cY + (cY * 0.25)) > (y + h)) and ((circumference * 0.25) > c.shape[0]):
             #     self.finger_rects_and_cnt.append((x, y, w, h, c))
             #     count += 1
-            if (circumference * 0.25 > c.shape[0]):
+            if (circumference * 0.10 > c.shape[0]):
                 self.finger_rects_and_cnt.append((x, y, w, h, c))
                 count += 1
         return count
@@ -327,5 +328,6 @@ class NumberRecognition:
             self.show()
 
 
-numrec = NumberRecognition(thresh=45, camera=1)
+#numrec = NumberRecognition(thresh=45, camera=1)
+numrec = NumberRecognition(thresh=45, camera=0)
 numrec.run()
