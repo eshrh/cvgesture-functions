@@ -127,7 +127,7 @@ class NumberRecognition:
 
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
         #cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
-        cv2.ellipse(circular_roi, (cX,cY), (radius,radius//2), 0, 0, 360, 255, 1)
+        cv2.ellipse(circular_roi, (cX,cY), (radius,int(radius/1.5)), 0, 20, -190, 255, 1)
 
         self.palm_circle = circular_roi
 
