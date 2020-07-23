@@ -51,7 +51,7 @@ def imageGrid(images, rows=2, columns=3, cell_width=320, cell_height=240):
 class NumberRecognition:
     def __init__(self, thresh=15, camera=0):
         self.settings = self.parseSettings()
-
+        # print(self.settings)
         # region of interest(roi)
         self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
 
