@@ -16,32 +16,53 @@ class cvContour:
         # might be other way around?
         return cv2.contourArea(self.contour) < cv2.contourArea(ocontour.contour)
 
+def imageGrid(images, rows=2, columns=3, cell_width=320, cell_height=240):
+    # Convert all gray images to BGR
+    images = [(cv2.cvtColor(image, cv2.COLOR_GRAY2BGR) if len(image.shape) == 2 else image) for image in images]
+    # Scale all images
+    images = [cv2.resize(image, (cell_width, cell_height)) for image in images]
+    # Write numbers onto images
+    for image_i in range(len(images)): cv2.putText(images[image_i], f"{image_i}", (10,50), cv2.FONT_HERSHEY_PLAIN, 4, (255,255,255), 2)
+    # Create empty images as needed
+    for _ in range((rows*columns) - len(images)):
+        images.append(np.zeros_like(images[0]))
+    # Generate image rows
+    img_rows = [
+        cv2.hconcat([images[(columns*row) + column] for column in range(columns)]) for row in range(rows)
+    ]
+    # Concatinate image rows and return
+    return cv2.vconcat(img_rows)
 
 class NumberRecognition:
-    def __init__(self, thresh=15):
-        self.settings = self.parse_settings()
+    def __init__(self, thresh=15, camera=0):
+        self.settings = self.parseSettings()
 
-        self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
         # region of interest(roi)
+        self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
 
         self.accumulate = 0.5
 
         self.thresh = thresh
-        self.vid = cv2.VideoCapture(0)
+        self.vid = cv2.VideoCapture(camera)
         self.bg = None
         self.cnt = None
 
+        self.thresholded = None
+        self.hand_cnt = None
+        self.chull = None
+
         # use the first 50 frames to get the running average of the bg.
-        self.initweights(50)
+        self.initWeights(50)
     
+    # Gesture Recognition
     def bwroi(self) -> np.ndarray:
-        # crop out the roi from the full frame, blur it to make contouring easier.
-        frame = self.getframe()
+        '''Crop out the roi (region of interest) from the full frame, blur it to make contouring easier.'''
+        frame = self.getFrame()
         cropped = frame[self.top : self.bottom, self.right : self.left]
         return cv2.GaussianBlur(cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY), (7, 7), 0)
     
-    def contourDetect(self, frame) -> tuple:
-        # compute thresholded and contours
+    def contourDetect(self, frame:np.ndarray) -> tuple:
+        '''Compute thresholded and contours. Returns -1 if no contours found.'''
         diff = cv2.absdiff(self.bg.astype("uint8"), frame)
         thresholded = cv2.threshold(diff, self.thresh, 255, cv2.THRESH_BINARY)[1]
         contours, hierarchy = cv2.findContours(
@@ -53,11 +74,13 @@ class NumberRecognition:
         # pick the biggest contour
         return (thresholded, max([cvContour(i) for i in contours]).contour)
 
-    def count(self, thresholded, segmented) -> int:
+    def countFingers(self, thresholded:np.ndarray, segmented:np.ndarray) -> int:
+        '''Counts the fingers held up on a hand.'''
         # the algorithm
         #http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
         # compute complex hull
         chull = cv2.convexHull(segmented)
+        self.chull = chull
 
         # find extrema of the hull
         extreme_top = tuple(chull[chull[:, :, 1].argmin()][0])
@@ -69,6 +92,7 @@ class NumberRecognition:
         cX = int((extreme_left[0] + extreme_right[0]) / 2)
         cY = int((extreme_top[1] + extreme_bottom[1]) / 2)
 
+        # Find max distance between the extrema
         distance = pairwise.euclidean_distances(
             [(cX, cY)], Y=[extreme_left, extreme_right, extreme_top, extreme_bottom]
         )[0]
@@ -80,9 +104,11 @@ class NumberRecognition:
 
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
         cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
+        self.palm_circle = circular_roi
 
         # bitwise and the circle and the full image to get the fingers.
         circular_roi = cv2.bitwise_and(thresholded, thresholded, mask=circular_roi)
+        self.severed_fingers = circular_roi
 
         cnts, _ = cv2.findContours(
             circular_roi.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
@@ -96,40 +122,24 @@ class NumberRecognition:
                 count += 1
         return count
 
-    def draw(self) -> None:
-        cv2.rectangle(
-            self.clone, (self.left, self.top), (self.right, self.bottom), (0, 255, 0), 2
-        )
-        if self.cnt is not None:
-            cv2.putText(
-                self.clone,
-                str(self.cnt),
-                (70, 45),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2,
-            )
-        cv2.imshow("opencv", self.clone)
-        cv2.waitKey(1)
-
     def getContour(self) -> tuple:
-        # basically just a thin wrapper func.
-        maxcontour = self.contourDetect(self.bwroi())
-        if maxcontour != -1:
-            return maxcontour
+        '''Thin wrapper function for contourDetect. Returns the thresholded image and the largest contour if a contour is found, otherwise no return.'''
+        thresh_and_max_contour = self.contourDetect(self.bwroi())
+        if thresh_and_max_contour != -1:
+            return thresh_and_max_contour
 
-    def getframe(self) -> np.ndarray:
-        # general processing
+    def getFrame(self) -> np.ndarray:
+        '''Reads the current frame, processes it's size, flips it, and updates the display and debug images.'''
         _, frame = self.vid.read()
         if frame is not None:
             resized = imutils.resize(frame, width=700)
             frame = cv2.flip(imutils.resize(frame, width=700), 1)
-            self.clone = frame.copy()
+            self.display_img = frame.copy()
+            self.debug_img = frame.copy()
         return frame
 
-    def initweights(self, nframes) -> None:
-        # wrapper for accbg
+    def initWeights(self, nframes:int) -> None:
+        '''Accumulates the first nframes to effectively remove the background.'''
         for _ in range(nframes):
             frame = self.bwroi()
             # set the running average of the background
@@ -138,42 +148,9 @@ class NumberRecognition:
                 continue
             cv2.accumulateWeighted(frame, self.bg, self.accumulate)
     
-    def kill(self) -> None:
-        self.vid.release()
-        cv2.destroyAllWindows()
-    
-    def parse_settings(self) -> dict:
-        settings = None
-        with open("settings.yaml","r") as f:
-            settings = yaml.safe_load(f)
-        return settings
-
-    def run(self) -> None:
-        totalcnt = 0
-        cur = 0
-        prevcnt = -1
-        while True:
-            contour = self.getContour()
-            if contour:
-                thresholded, segmented = contour
-                # use the average finger count of the past 5 frames.
-                totalcnt += self.count(thresholded, segmented)
-                if cur >= 5:
-                    self.cnt = round(totalcnt / cur)
-                    cur = 0
-                    totalcnt = 0
-                if self.cnt != prevcnt:
-                    if self.cnt!=0 and self.cnt in self.settings:
-                        self.send_command(self.settings[self.cnt])
-                    prevcnt = self.cnt
-            else:
-                self.cnt = 0
-                cur = 0
-                totalcnt = 0
-            cur += 1
-            self.draw()
-
-    def send_command(self, command) -> None:
+    # Command Execution
+    def runCommand(self, command:str) -> None:
+        '''Run the given input simulation command.'''
         if command=="lmb":
             mouse.click(button="left")
             print("leftclicked")
@@ -183,5 +160,113 @@ class NumberRecognition:
             keyboard.press_and_release(command)
         return
 
-numrec = NumberRecognition()
+    # User Display
+    def drawDebug(self, additional_imgs:list=None) -> None:
+        '''Draws the debug image previously initialized in getFrame. Saved as debug_img.'''
+        # self.debug_img = cv2.cvtColor(self.debug_img, cv2.COLOR_BGR2GRAY)
+        cv2.rectangle(
+            self.debug_img, (self.left, self.top), (self.right, self.bottom), (0, 255, 0), 2
+            )
+        if self.cnt is not None:
+            cv2.putText(
+                self.debug_img,
+                str(self.cnt),
+                (70, 45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+                )
+           
+        if self.chull is not None:
+            # chull = np.array([[[cnt[0][0] + self.right, cnt[0][1]]] for cnt in self.chull])
+            chull = self.chull
+            thresholded = cv2.cvtColor(self.thresholded, cv2.COLOR_GRAY2BGR)
+            # for contour_i in range(len(chull)):
+            #     cv2.drawContours(thresholded, chull, contour_i, (255,0,0), 8)
+            cv2.drawContours(thresholded, chull, -1, (255,0,0), 8)
+            # # Move hand contour right by self.right
+            # hand_cnt = np.array([[[cnt[0][0] + self.right, cnt[0][1]]] for cnt in self.hand_cnt])
+            # # Draw hand contour
+            # cv2.drawContours(self.debug_img, hand_cnt, -1, (255,255,255), 2)
+
+            # Draw palm circle
+            cv2.drawContours(thresholded, self.hand_cnt, -1, (0,0,255), 2)
+            # Add thresholded image to debug image grid.
+            severed_fingers = cv2.cvtColor(self.severed_fingers, cv2.COLOR_GRAY2BGR)
+            # print(np.where((severed_fingers==[255, 255, 255])))
+            severed_fingers[np.where((severed_fingers==[255, 255, 255]).all(axis=2))] = [0,0,255]
+            self.debug_img = imageGrid([severed_fingers, thresholded], rows=1, columns=2)
+
+    def drawDisplay(self) -> None:
+        '''Draws the display image previously initialized in getFrame. Saved as display_img.'''
+        cv2.rectangle(
+            self.display_img, (self.left, self.top), (self.right, self.bottom), (0, 255, 0), 2
+            )
+        if self.cnt is not None:
+            cv2.putText(
+                self.display_img,
+                str(self.cnt),
+                (70, 45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+            )
+
+    def show(self, debug:bool=True) -> None:
+        '''Launches and updates the video window.'''
+        self.drawDisplay()
+        if debug == True:
+            self.drawDebug()
+            width = self.display_img.shape[1]
+            height = self.display_img.shape[0]
+            cv2.imshow("OpenGesture - Debug", imageGrid([self.display_img, self.debug_img], rows=1, columns=2, cell_width=width, cell_height=height))
+        else:
+            cv2.imshow("OpenGesture", self.display_img)
+        if cv2.waitKey(1) == ord("q"):
+            self.kill()
+
+    # User Settings
+    def parseSettings(self) -> dict:
+        '''Returns the settings.yaml file as a dictionary.'''
+        settings = None
+        with open("settings.yaml","r") as f:
+            settings = yaml.safe_load(f)
+        return settings
+
+    # NumberRecognition API
+    def kill(self) -> None:
+        '''Stop video stream and close windows'''
+        self.vid.release()
+        cv2.destroyAllWindows()
+
+    def run(self) -> None:
+        '''Main loop of NumberRecognition.'''
+        totalcnt = 0
+        cur = 0
+        prevcnt = -1
+        while True:
+            # Updates frame clone and retrieves contoured image.
+            contour = self.getContour()
+            if contour:
+                self.thresholded, self.hand_cnt = contour
+                # use the average finger count of the past 5 frames.
+                totalcnt += self.countFingers(self.thresholded.copy(), self.hand_cnt.copy())
+                if cur >= 5:
+                    self.cnt = round(totalcnt / cur)
+                    cur = 0
+                    totalcnt = 0
+                if self.cnt != prevcnt:
+                    if self.cnt!=0 and self.cnt in self.settings:
+                        self.runCommand(self.settings[self.cnt])
+                    prevcnt = self.cnt
+            else:
+                self.cnt = 0
+                cur = 0
+                totalcnt = 0
+            cur += 1
+            self.show()
+
+numrec = NumberRecognition(thresh=45, camera=1)
 numrec.run()
