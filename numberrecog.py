@@ -106,6 +106,7 @@ class NumberRecognition:
         # palm center
         cX = int((extreme_left[0] + extreme_right[0]) / 2)
         cY = int((extreme_top[1] + extreme_bottom[1]) / 2)
+        self.cX,self.cY = cX,cY
 
         # Find max distance between the extrema
         distance = pairwise.euclidean_distances(
@@ -115,6 +116,7 @@ class NumberRecognition:
 
         # estimate the palm as a circular region
         radius = int(0.8 * maximum_distance)
+
         circumference = 2 * np.pi * radius
 
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
@@ -201,8 +203,8 @@ class NumberRecognition:
             # chull = np.array([[[cnt[0][0] + self.right, cnt[0][1]]] for cnt in self.chull])
             chull = self.chull
             thresholded = cv2.cvtColor(self.thresholded, cv2.COLOR_GRAY2BGR)
-            # for contour_i in range(len(chull)):
-            #     cv2.drawContours(thresholded, chull, contour_i, (255,0,0), 8)
+            #for contour_i in range(len(chull)):
+                #cv2.drawContours(thresholded, chull, contour_i, (255,0,0), 8)
             cv2.drawContours(thresholded, chull, -1, (255, 0, 0), 8)
             # # Move hand contour right by self.right
             # hand_cnt = np.array([[[cnt[0][0] + self.right, cnt[0][1]]] for cnt in self.hand_cnt])
@@ -210,13 +212,17 @@ class NumberRecognition:
             # cv2.drawContours(self.debug_img, hand_cnt, -1, (255,255,255), 2)
 
             # Draw palm circle
-            cv2.drawContours(thresholded, self.hand_cnt, -1, (0, 0, 255), 2)
+            #cv2.drawContours(thresholded, self.hand_cnt, -1, (0, 0, 255), 2)
+            #
             # Add thresholded image to debug image grid.
             severed_fingers = cv2.cvtColor(self.severed_fingers, cv2.COLOR_GRAY2BGR)
+            cv2.circle(severed_fingers, (self.cX,self.cY), 1, (0,255,255), 2)
+
             # print(np.where((severed_fingers==[255, 255, 255])))
             severed_fingers[
                 np.where((severed_fingers == [255, 255, 255]).all(axis=2))
             ] = [0, 0, 255]
+
             self.debug_img = imageGrid(
                 [severed_fingers, thresholded], rows=1, columns=2
             )
@@ -307,5 +313,5 @@ class NumberRecognition:
             self.show()
 
 
-numrec = NumberRecognition(thresh=45, camera=1)
+numrec = NumberRecognition(thresh=45, camera=0)
 numrec.run()
