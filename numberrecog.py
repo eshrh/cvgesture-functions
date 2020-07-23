@@ -65,6 +65,7 @@ class NumberRecognition:
         self.thresholded = None
         self.hand_cnt = None
         self.chull = None
+        self.finger_rects_and_cnt = None
 
         # use the first 50 frames to get the running average of the bg.
         self.initWeights(50)
@@ -73,8 +74,9 @@ class NumberRecognition:
     def bwroi(self) -> np.ndarray:
         """Crop out the roi (region of interest) from the full frame, blur it to make contouring easier."""
         frame = self.getFrame()
-        cropped = frame[self.top : self.bottom, self.right : self.left]
-        return cv2.GaussianBlur(cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY), (7, 7), 0)
+        if frame is not None:
+            cropped = frame[self.top : self.bottom, self.right : self.left]
+            return cv2.GaussianBlur(cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY), (7, 7), 0)
 
     def contourDetect(self, frame: np.ndarray) -> tuple:
         """Compute thresholded and contours. Returns -1 if no contours found."""
@@ -82,7 +84,7 @@ class NumberRecognition:
         thresholded = cv2.threshold(diff, self.thresh, 255, cv2.THRESH_BINARY)[1]
         contours, hierarchy = cv2.findContours(
             thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+            )
         # lots of overhead...
         if contours == []:
             return -1
@@ -94,6 +96,7 @@ class NumberRecognition:
         # the algorithm
         # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.454.3689&rep=rep1&type=pdf
         # compute complex hull
+        palm_to_distance_ratio = 0.7
         chull = cv2.convexHull(segmented)
         self.chull = chull
 
@@ -111,11 +114,11 @@ class NumberRecognition:
         # Find max distance between the extrema
         distance = pairwise.euclidean_distances(
             [(cX, cY)], Y=[extreme_left, extreme_right, extreme_top, extreme_bottom]
-        )[0]
+            )[0]
         maximum_distance = distance[distance.argmax()]
 
         # estimate the palm as a circular region
-        radius = int(0.8 * maximum_distance)
+        radius = int(palm_to_distance_ratio * maximum_distance)
 
         circumference = 2 * np.pi * radius
 
@@ -129,13 +132,19 @@ class NumberRecognition:
 
         cnts, _ = cv2.findContours(
             circular_roi.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-        )
+            )
+        self.finger_cnts = cnts
         count = 0
+        self.finger_rects_and_cnt = []
         for c in cnts:
             (x, y, w, h) = cv2.boundingRect(c)
 
             # it is a finger only if it is outside the palm and not below the palm.
-            if ((cY + (cY * 0.25)) > (y + h)) and ((circumference * 0.25) > c.shape[0]):
+            # if ((cY + (cY * 0.25)) > (y + h)) and ((circumference * 0.25) > c.shape[0]):
+            #     self.finger_rects_and_cnt.append((x, y, w, h, c))
+            #     count += 1
+            if (circumference * 0.25 > c.shape[0]):
+                self.finger_rects_and_cnt.append((x, y, w, h, c))
                 count += 1
         return count
 
@@ -197,7 +206,7 @@ class NumberRecognition:
                 1,
                 (0, 0, 255),
                 2,
-            )
+                )
 
         if self.chull is not None:
             # chull = np.array([[[cnt[0][0] + self.right, cnt[0][1]]] for cnt in self.chull])
@@ -215,17 +224,22 @@ class NumberRecognition:
             #cv2.drawContours(thresholded, self.hand_cnt, -1, (0, 0, 255), 2)
             #
             # Add thresholded image to debug image grid.
-            severed_fingers = cv2.cvtColor(self.severed_fingers, cv2.COLOR_GRAY2BGR)
-            cv2.circle(severed_fingers, (self.cX,self.cY), 1, (0,255,255), 2)
+            circle_hud = cv2.cvtColor(self.palm_circle, cv2.COLOR_GRAY2BGR)
+            circle_hud[
+                np.where((circle_hud == [255, 255, 255]).all(axis=2))
+                ] = [0, 0, 255]
+            cv2.circle(circle_hud, (self.cX,self.cY), 1, (0,255,255), 2)
+            circle_hud = cv2.add(circle_hud, cv2.cvtColor(self.severed_fingers, cv2.COLOR_GRAY2BGR))
 
-            # print(np.where((severed_fingers==[255, 255, 255])))
-            severed_fingers[
-                np.where((severed_fingers == [255, 255, 255]).all(axis=2))
-            ] = [0, 0, 255]
+            for (x, y, w, h, c) in self.finger_rects_and_cnt:
+                cv2.rectangle(circle_hud, (x, x+w), (y, y+h), (255,255,0), 1)
+                cv2.drawContours(circle_hud, c, -1, (0,255,0), 3)
+
+            # self.debug_img = cv2.addWeighted(thresholded, 0.4, circle_hud, 0.7, 0)
 
             self.debug_img = imageGrid(
-                [severed_fingers, thresholded], rows=1, columns=2
-            )
+                [cv2.addWeighted(thresholded, 0.4, circle_hud, 0.7, 0)], rows=1, columns=1
+                )
 
     def drawDisplay(self) -> None:
         """Draws the display image previously initialized in getFrame. Saved as display_img."""
@@ -313,5 +327,5 @@ class NumberRecognition:
             self.show()
 
 
-numrec = NumberRecognition(thresh=45, camera=0)
+numrec = NumberRecognition(thresh=45, camera=1)
 numrec.run()
