@@ -5,7 +5,7 @@ from sklearn.metrics import pairwise
 import yaml
 import keyboard
 import mouse
-
+import time
 
 class cvContour:
     # define a class to make contours sortable.
@@ -22,7 +22,7 @@ def imageGrid(images, rows=2, columns=3, cell_width=320, cell_height=240):
     images = [
         (cv2.cvtColor(image, cv2.COLOR_GRAY2BGR) if len(image.shape) == 2 else image)
         for image in images
-    ]
+        ]
     # Scale all images
     images = [cv2.resize(image, (cell_width, cell_height)) for image in images]
     # Write numbers onto images
@@ -43,7 +43,7 @@ def imageGrid(images, rows=2, columns=3, cell_width=320, cell_height=240):
     img_rows = [
         cv2.hconcat([images[(columns * row) + column] for column in range(columns)])
         for row in range(rows)
-    ]
+        ]
     # Concatinate image rows and return
     return cv2.vconcat(img_rows)
 
@@ -54,13 +54,14 @@ class NumberRecognition:
         # print(self.settings)
         # region of interest(roi)
         self.top, self.right, self.bottom, self.left = 10, 350, 225, 590
+        self.command_delay = 0.5 # seconds
 
         self.accumulate = 0.5
 
         self.thresh = thresh
         self.vid = cv2.VideoCapture(camera)
         self.bg = None
-        self.cnt = None
+        self.finger_count = None
 
         self.thresholded = None
         self.hand_cnt = None
@@ -127,7 +128,7 @@ class NumberRecognition:
 
         circular_roi = np.zeros(thresholded.shape[:2], dtype="uint8")
         #cv2.circle(circular_roi, (cX, cY), radius, 255, 1)
-        cv2.ellipse(circular_roi, (cX,cY), (radius,int(radius/1.5)), 0, 20, -190, 255, 1)
+        cv2.ellipse(circular_roi, (cX,cY), (radius,int(radius/1.5)), 0, 20, -210, 255, 1)
 
         self.palm_circle = circular_roi
 
@@ -203,10 +204,10 @@ class NumberRecognition:
             (0, 255, 0),
             2,
         )
-        if self.cnt is not None:
+        if self.finger_count is not None:
             cv2.putText(
                 self.debug_img,
-                str(self.cnt),
+                str(self.finger_count),
                 (70, 45),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
@@ -256,10 +257,10 @@ class NumberRecognition:
             (0, 255, 0),
             2,
         )
-        if self.cnt is not None:
+        if self.finger_count is not None:
             cv2.putText(
                 self.display_img,
-                str(self.cnt),
+                str(self.finger_count),
                 (70, 45),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
@@ -305,34 +306,41 @@ class NumberRecognition:
 
     def run(self) -> None:
         """Main loop of NumberRecognition."""
-        totalcnt = 0
-        cur = 0
-        prevcnt = -1
+        # totalcnt = 0
+        command_executed = False
+        start_hold_time = 0
+        finger_hold_time = 0
+        prev_finger_count = 0
         while True:
             # Updates frame clone and retrieves contoured image.
             contour = self.getContour()
             if contour:
                 self.thresholded, self.hand_cnt = contour
-                # use the average finger count of the past 5 frames.
-                totalcnt += self.countFingers(
+                # Save finger count as the current finger count
+                current_finger_count = self.countFingers(
                     self.thresholded.copy(), self.hand_cnt.copy()
                     )
-                if cur >= 5:
-                    self.cnt = round(totalcnt / cur)
-                    cur = 0
-                    totalcnt = 0
-                if self.cnt != prevcnt:
-                    if self.cnt != 0 and self.cnt in self.settings:
-                        self.runCommand(self.settings[self.cnt])
-                    prevcnt = self.cnt
+                self.finger_count = current_finger_count
+                print(finger_hold_time, start_hold_time, finger_hold_time-start_hold_time)
+                # If the current finger count is equal to the previous finger count, add to the finger_hold_time
+                if prev_finger_count == current_finger_count:
+                    finger_hold_time = time.time()
+                    # If the finger_hold_time is greater than self.command_delay, execute the given command for the current finger, setting the executed boolean to true
+                    if ((finger_hold_time-start_hold_time) >= self.command_delay) and (command_executed == False) and (current_finger_count in self.settings):
+                        print("EXECUTE")
+                        self.runCommand(self.settings[current_finger_count])
+                        command_executed = True
+                # elif the current finger count is not equal to the previous finger count, set finger hold_time to zero and set the new prev finger count and executed to false
+                else:
+                    prev_finger_count = current_finger_count
+                    start_hold_time = time.time()
+                    finger_hold_time = start_hold_time
+                    command_executed = False
             else:
-                self.cnt = 0
-                cur = 0
-                totalcnt = 0
-            cur += 1
+                self.finger_count = 0
             self.show()
 
 
-numrec = NumberRecognition(thresh=15, camera=1)
+numrec = NumberRecognition(thresh=45, camera=1)
 # numrec = NumberRecognition(thresh=45, camera=0)
 numrec.run()
